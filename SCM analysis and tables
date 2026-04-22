@@ -26,7 +26,7 @@ donor_fips <- c(16, 18, 19, 20, 31, 33, 40, 42, 49, 55, 56)
 dataprep.out <- dataprep(
   foo                   = data,
   predictors            = c("polit_ideo", "unem_rate", "young_adult_share",
-                            "urban_pop", "alcohol_per_cap"),
+                            "urban_pop", "alcohol_per_cap", "median_income),
   predictors.op         = "mean",  # average over pre-treatment period
   special.predictors    = list(
     # anchoring fatality rate at each pre-treatment year
