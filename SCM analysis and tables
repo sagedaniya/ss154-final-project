@@ -1,0 +1,179 @@
+#PART 1 - RUNNING THE ANALYSIS AND GETTIN RESULTS
+install.packages(c("Synth", "tidyverse", "xtable"))
+ 
+library(Synth)
+library(tidyverse)
+library(xtable)
+ 
+# load data from google sheets
+data <- read.csv(
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ3nrspxctohs7x-p1EVrQrhoS_lf7679lsgKbqm5GEc_Pz2gMpYPDUc2uUpRT198g19y7-76pg0r3e/pub?gid=628823611&single=true&output=csv",
+  stringsAsFactors = TRUE
+)
+ 
+# clean column names
+colnames(data) <- trimws(colnames(data))
+data[["state"]] <- as.character(data[["state"]])
+ 
+# donor pool - 11 never-treated states chosen based on similarity to colorado
+# fips codes: idaho=16, indiana=18, iowa=19, kansas=20, nebraska=31,
+# new hampshire=33, oklahoma=40, pennsylvania=42, utah=49, wisconsin=55, wyoming=56
+donor_fips <- c(16, 18, 19, 20, 31, 33, 40, 42, 49, 55, 56)
+ 
+# dataprep
+# colorado fips = 8, treatment starts 2014
+# pre period is 2006-2013
+dataprep.out <- dataprep(
+  foo                   = data,
+  predictors            = c("polit_ideo", "unem_rate", "young_adult_share",
+                            "urban_pop", "alcohol_per_cap"),
+  predictors.op         = "mean",  # average over pre-treatment period
+  special.predictors    = list(
+    # anchoring fatality rate at each pre-treatment year
+    list("fatality_rate", 2006, "mean"),
+    list("fatality_rate", 2007, "mean"),
+    list("fatality_rate", 2008, "mean"),
+    list("fatality_rate", 2009, "mean"),
+    list("fatality_rate", 2010, "mean"),
+    list("fatality_rate", 2011, "mean"),
+    list("fatality_rate", 2012, "mean"),
+    list("fatality_rate", 2013, "mean")
+  ),
+  dependent             = "fatality_rate",
+  unit.variable         = "fips",
+  unit.names.variable   = "state",
+  time.variable         = "year",
+  treatment.identifier  = 8,
+  controls.identifier   = donor_fips,
+  time.predictors.prior = 2006:2013,
+  time.optimize.ssr     = 2006:2013,   # minimize pre-treatment error over this window
+  time.plot             = 2006:2023
+)
+ 
+# run SCM
+synth.out    <- synth(data.prep.obj = dataprep.out)
+synth.tables <- synth.tab(dataprep.res = dataprep.out, synth.res = synth.out)
+ 
+ 
+# path plot
+par(mar = c(5, 5, 4, 2))
+path.plot(
+  synth.res       = synth.out,
+  dataprep.res    = dataprep.out,
+  Ylab            = "Fatality Rate per 100,000 Population",
+  Xlab            = "Year",
+  Legend          = c("Colorado", "Synthetic Colorado"),
+  Legend.position = "topright",
+  Main            = "Colorado vs. Synthetic Colorado"
+)
+abline(v = 2014, lty = 2, col = "black")
+text(2014, par("usr")[4] * 0.97, "Retail Sales Begin (2014)", pos = 2, cex = 0.8)
+ 
+# gap plot
+par(mar = c(5, 5, 4, 2))
+gaps.plot(
+  synth.res    = synth.out,
+  dataprep.res = dataprep.out,
+  Ylab         = "Gap in Fatality Rate per 100,000 Population",
+  Xlab         = "Year",
+  Main         = "Gap: Colorado minus Synthetic Colorado"
+)
+abline(v = 2014, lty = 2, col = "black")
+abline(h = 0,    lty = 1, col = "black")
+par(mar = c(5, 4, 4, 2) + 0.1)
+ 
+# extract tables
+synth.tables <- synth.tab(dataprep.res = dataprep.out, synth.res = synth.out)
+ 
+print("Donor State Weights:")
+print(synth.tables$tab.w)
+ 
+print("Covariate Balance (Pre-treatment):")
+print(synth.tables$tab.pred)
+ 
+ 
+# weights table - latex output
+weights_df <- data.frame(
+  State  = synth.tables$tab.w$unit.names,
+  Weight = round(synth.tables$tab.w$w.weights, 3)
+)
+ 
+cat("\n% latex: weights table\n")
+print(xtable(
+  weights_df,
+  caption = "Donor State Weights in Synthetic Colorado",
+  label   = "tab:weights",
+  digits  = 3
+),
+  include.rownames       = FALSE,
+  booktabs               = TRUE,
+  caption.placement      = "top",
+  sanitize.text.function = identity
+)
+ 
+# covariate balance table
+pred_table <- as.data.frame(synth.tables$tab.pred)
+rownames(pred_table) <- c(
+  "Political ideology",
+  "Unemployment rate (\\%)",
+  "Young adult share (\\%)",
+  "Urban population (\\%)",
+  "Alcohol per capita (gallons)",
+  "Median_income",
+  "Fatality rate (2006)",
+  "Fatality rate (2007)",
+  "Fatality rate (2008)",
+  "Fatality rate (2009)",
+  "Fatality rate (2010)",
+  "Fatality rate (2011)",
+  "Fatality rate (2012)",
+  "Fatality rate (2013)"
+)
+colnames(pred_table) <- c("Colorado", "Synthetic Colorado", "Donor Pool Mean")
+ 
+cat("\n% latex: covariate balance table\n")
+print(xtable(
+  pred_table,
+  caption = "Pre-Treatment Covariate Balance: Colorado vs. Synthetic Colorado",
+  label   = "tab:balance",
+  digits  = 3
+),
+  include.rownames       = TRUE,
+  booktabs               = TRUE,
+  caption.placement      = "top",
+  sanitize.text.function = identity
+)
+ 
+# year by year treatment effect
+years_all   <- 2006:2023
+actual_vals <- as.numeric(dataprep.out$Y1plot)
+synth_vals  <- as.numeric(dataprep.out$Y0plot %*% synth.out$solution.w)
+gap_vals    <- actual_vals - synth_vals
+ 
+effect_df <- data.frame(
+  Year                 = years_all,
+  Colorado             = round(actual_vals, 3),
+  `Synthetic Colorado` = round(synth_vals, 3),
+  Gap                  = round(gap_vals, 3),
+  check.names          = FALSE
+)
+ 
+# average gaps for table caption
+avg_pre_gap  <- round(mean(gap_vals[years_all < 2014]), 3)
+avg_post_gap <- round(mean(gap_vals[years_all >= 2014]), 3)  # this is the ATT
+ 
+cat("\n% latex: treatment effect table\n")
+print(xtable(
+  effect_df,
+  caption = paste0(
+    "Traffic Fatality Rate: Colorado vs. Synthetic Colorado (2006--2023). ",
+    "Average pre-treatment gap (2006--2013): ", avg_pre_gap, ". ",
+    "Average post-treatment gap / ATT (2014--2023): ", avg_post_gap, "."
+  ),
+  label  = "tab:effects",
+  digits = 3
+),
+  include.rownames  = FALSE,
+  booktabs          = TRUE,
+  caption.placement = "top"
+)
