@@ -1,0 +1,99 @@
+# Data is stored locally
+donor_data <- donor_pool
+all_data <- all_states
+
+# Packages
+install.packages("kableExtra")
+install.packages("tidyverse")
+install.packages("ggplot2")
+library(tidyverse)  # For data manipulation (filter, mutate, summarise, etc.)
+library(kableExtra) # For creating formatted LaTeX tables
+library(ggplot2) # For plots   
+
+# SUMMARY STATS FOR DATA SECTION 
+
+
+# Filtering years for pre-treatment 
+pre_treatment <- all_data %>% 
+     filter(year >= 2006 & year <= 2013)
+ 
+# Calculate mean and standard deviation for each variable within each group
+comparison_data <- pre_treatment %>%
+
+ # Create a grouping variable
+  mutate(Group = ifelse(state == "Colorado", "Colorado", "All Other States")) %>%
+  # Group by this new variable so we get separate statistics for each group
+  group_by(Group) %>%
+  # Calculate  mean (SD) format for each variable
+  summarise(
+    `Fatality` = sprintf("%.2f (%.2f)", mean(fatality_rate), sd(fatality_rate)),
+    `Pol. Ideology` = sprintf("%.2f (%.2f)", mean(polit_ideo), sd(polit_ideo)),
+    `Unemp. Rate` = sprintf("%.2f (%.2f)", mean(unem_rate), sd(unem_rate)),
+    `Young Adult (%)` = sprintf("%.2f (%.2f)", mean(young_adult_share), sd(young_adult_share)),
+    `Urban (%)` = sprintf("%.2f (%.2f)", mean(urban_pop), sd(urban_pop)),
+    `Alcohol` = sprintf("%.2f (%.2f)", mean(alcohol_per_cap), sd(alcohol_per_cap)),
+    `Med. Income` = sprintf("%.0f (%.0f)", mean(median_income), sd(median_income)),
+    N = n()
+  ) %>%
+  ungroup()
+  
+ # Make LATEX table so it looks pretty 
+  
+latex_table <- kable(comparison_data, 
+                     format = "latex",          
+                     booktabs = TRUE,           
+                     escape = TRUE,           
+                     align = c('l', rep('r', 7), 'r'), 
+                     caption = "Pre-treatment Comparison: Colorado vs. All Other States (2006-2013)",
+                     label = "pretreatment") %>% 
+  kable_styling(latex_options = c("hold_position", "scale_down")) %>%
+  add_footnote("Standard deviations in parentheses. N = number of state-year observations.",
+               notation = "none")
+
+latex_table
+
+
+
+######
+
+
+
+# MAKING VISUALIZATION OF TRAFFIC DEATH TRENDS
+
+trend_data <- all_data %>% # Filter data to include years 2006-2023
+  filter(year >= 2006 & year <= 2023) %>%
+  # Create two groups: Colorado vs. all other 49 states
+  mutate(Group = ifelse(state == "Colorado", "Colorado", "All Other States")) %>%
+  # Group by year and group to calculate average fatality rate for each
+  group_by(year, Group) %>%
+  # Calculate mean fatality rate
+  summarise(avg_fatality = mean(fatality_rate), .groups = 'drop')
+  
+  
+  
+# Create the line plot
+trend_plot <- ggplot(trend_data, aes(x = year, y = avg_fatality, color = Group)) +
+  geom_line(linewidth = 1) + 
+  
+  # 2014 to mark treatment year
+  geom_vline(xintercept = 2014, linetype = "dashed", color = "gray50") +
+  
+  annotate("text", x = 2014, y = max(trend_data$avg_fatality), 
+           label = "Treatment (2014)", vjust = -0.5, size = 3) +
+  
+  labs(
+    x = "Year",
+    y = "Traffic Fatality Rate (per 100M VMT)",
+    title = "Traffic Fatality Trends: Colorado vs. All Other States",
+    color = "" 
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    legend.position = "bottom",           # Legend at bottom of plot
+    panel.grid.minor = element_blank()  
+  ) +
+  
+  # colors because why not
+  scale_color_manual(values = c("Colorado" = "blue", "All Other States" = "red"))
