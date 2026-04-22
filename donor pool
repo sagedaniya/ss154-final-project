@@ -1,0 +1,128 @@
+# DONOR POOL SELECTION TABLE 
+
+# DISTANCE TABLE FROM COL
+
+never_legalized <- c("Alabama", "Arkansas", "Florida", "Georgia", "Hawaii", 
+                     "Idaho", "Indiana", "Iowa", "Kansas", "Kentucky", 
+                     "Louisiana", "Mississippi", "Nebraska", "New Hampshire", 
+                     "North Carolina", "North Dakota", "Oklahoma", "Pennsylvania", 
+                     "South Carolina", "South Dakota", "Tennessee", "Texas", 
+                     "Utah", "West Virginia", "Wisconsin", "Wyoming")
+                     
+
+# Calculate averages for all never-legalizing states an Colorado
+all_states_avg <- all_data %>%
+  filter(year >= 2006 & year <= 2023) %>%
+  filter(state %in% c("Colorado", never_legalized)) %>%
+  group_by(state) %>%
+  summarise(
+    fatality_rate = mean(fatality_rate, na.rm = TRUE),
+    polit_ideo = mean(polit_ideo, na.rm = TRUE),
+    urban_pop = mean(urban_pop, na.rm = TRUE),
+    median_income = mean(median_income, na.rm = TRUE)
+  )
+
+# Colorado's values
+colorado_values <- all_states_avg %>% filter(state == "Colorado")
+
+# Colorado row for the table so we can compare the values
+colorado_row <- colorado_values %>%
+  mutate(total_distance = 0) %>%
+  select(state, fatality_rate, polit_ideo, urban_pop, median_income, total_distance) %>%
+  mutate(
+    fatality_rate = sprintf("%.2f", fatality_rate),
+    polit_ideo = sprintf("%.2f", polit_ideo),
+    urban_pop = sprintf("%.1f", urban_pop),
+    median_income = sprintf("%.0f", median_income),
+    total_distance = "-"  # Use dash for Colorado since it's the reference point
+  )
+
+# distance for all other states
+distance_table_others <- all_states_avg %>%
+  filter(state != "Colorado") %>%
+  mutate(
+    fat_diff = abs(fatality_rate - colorado_values$fatality_rate),
+    pol_diff = abs(polit_ideo - colorado_values$polit_ideo),
+    urban_diff = abs(urban_pop - colorado_values$urban_pop),
+    income_diff = abs(median_income - colorado_values$median_income),
+    total_distance = fat_diff + pol_diff + urban_diff/10 + income_diff/10000
+  ) %>%
+  arrange(total_distance) %>%
+  select(state, fatality_rate, polit_ideo, urban_pop, median_income, total_distance) %>%
+  mutate(
+    fatality_rate = sprintf("%.2f", fatality_rate),
+    polit_ideo = sprintf("%.2f", polit_ideo),
+    urban_pop = sprintf("%.1f", urban_pop),
+    median_income = sprintf("%.0f", median_income),
+    total_distance = sprintf("%.2f", total_distance)
+  )
+
+# Combining
+distance_table <- bind_rows(colorado_row, distance_table_others)
+
+# latex 
+latex_table <- kable(distance_table,
+                     format = "latex",
+                     booktabs = TRUE,
+                     escape = TRUE,
+                     col.names = c("State", "Fatality Rate", "Pol. Ideology", 
+                                   "Urban (\\%)", "Med. Income", "Distance"),
+                     caption = "States That Never Legalized Ranked by Distance from Colorado (2006-2023)",
+                     label = "distance") %>%
+  row_spec(1, bold = TRUE)  # Bold Colorado row
+
+latex_table
+
+
+
+
+######
+# SIMPLE COMPARISN FOUND IN APPENDIX 
+
+
+# Average for each state 
+state_averages_temp <- all_data %>%
+  filter(year >= 2006 & year <= 2023) %>%
+  filter(state %in% c("Colorado", never_legalized)) %>%
+  group_by(state) %>%
+  summarise(
+    fatality_rate = mean(fatality_rate, na.rm = TRUE),
+    polit_ideo = mean(polit_ideo, na.rm = TRUE),
+    unem_rate = mean(unem_rate, na.rm = TRUE),
+    young_adult_share = mean(young_adult_share, na.rm = TRUE),
+    urban_pop = mean(urban_pop, na.rm = TRUE),
+    alcohol_per_cap = mean(alcohol_per_cap, na.rm = TRUE),
+    median_income = mean(median_income, na.rm = TRUE)
+  )
+  
+
+# I want to see Colorado first for readability so I remove then combine it as first
+colorado_row <- state_averages_temp %>% filter(state == "Colorado")
+other_states <- state_averages_temp %>% filter(state != "Colorado") %>% arrange(state)
+
+# Combine
+state_averages <- bind_rows(colorado_row, other_states) %>%
+  # Format numbers for display
+  mutate(
+    fatality_rate = sprintf("%.2f", fatality_rate),
+    polit_ideo = sprintf("%.2f", polit_ideo),
+    unem_rate = sprintf("%.2f", unem_rate),
+    young_adult_share = sprintf("%.2f", young_adult_share),
+    urban_pop = sprintf("%.1f", urban_pop),
+    alcohol_per_cap = sprintf("%.2f", alcohol_per_cap),
+    median_income = sprintf("%.0f", median_income)
+  )
+
+# Latex
+latex_table <- kable(state_averages,
+                     format = "latex",
+                     booktabs = TRUE,
+                     escape = TRUE,
+                     col.names = c("State", "Fatality", "Pol. Ideo.", "Unemp.", 
+                                   "Young Adult (\\%)", "Urban (\\%)", "Alcohol", "Income"),
+                     caption = "Average Characteristics: Colorado and Never-Legalizing States (2006-2023)",
+                     label = "stateaverages") %>%
+  row_spec(1, bold = TRUE)  # Bold row 1 (which is now Colorado so it's easily readable )
+
+latex_table 
+# with all the Latex code, I pasted the output from R and pasted it into Latex to ahceive the professional look
