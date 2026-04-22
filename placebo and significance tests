@@ -1,0 +1,219 @@
+#PART 2 - PLACEBO TESTS AND SIGNIFICANCE TESTS
+# in-time placebo - fake treatment in 2010
+dataprep.placebo.time <- dataprep(
+  foo                   = data,
+  predictors            = c("polit_ideo", "unem_rate", "young_adult_share",
+                            "urban_pop", "alcohol_per_cap", "median_income"),
+  predictors.op         = "mean",
+  special.predictors    = list(
+    list("fatality_rate", 2006, "mean"),
+    list("fatality_rate", 2007, "mean"),
+    list("fatality_rate", 2008, "mean"),
+    list("fatality_rate", 2009, "mean")
+  ),
+  dependent             = "fatality_rate",
+  unit.variable         = "fips",
+  unit.names.variable   = "state",
+  time.variable         = "year",
+  treatment.identifier  = 8,
+  controls.identifier   = donor_fips,
+  time.predictors.prior = 2006:2009,  # shorter pre period for fake treatment
+  time.optimize.ssr     = 2006:2009,
+  time.plot             = 2006:2023
+)
+ 
+synth.placebo.time <- synth(data.prep.obj = dataprep.placebo.time)
+ 
+par(mar = c(5, 5, 4, 2))
+gaps.plot(
+  synth.res    = synth.placebo.time,
+  dataprep.res = dataprep.placebo.time,
+  Ylab         = "Gap in Fatality Rate per 100,000 Population",
+  Xlab         = "Year",
+  Main         = "In-Time Placebo Test (Fake Treatment Year = 2010)"
+)
+abline(v = 2010, lty = 2, col = "gray50")
+abline(v = 2014, lty = 2, col = "black")
+abline(h = 0,    lty = 1, col = "black")
+usr <- par("usr")
+plot_height <- usr[4] - usr[3]
+text(2010, usr[3] + plot_height * 0.92, "Placebo\n(2010)", pos = 4, cex = 0.75, col = "gray50")
+text(2014, usr[3] + plot_height * 0.82, "Actual\n(2014)",  pos = 2, cex = 0.75)
+par(mar = c(5, 4, 4, 2) + 0.1)
+ 
+ 
+# in-space placebo
+# using 5x MSPE filter to drop states that couldnt be matched well anyway
+co_pre_idx  <- which(years_all < 2014)
+co_mspe     <- mean(gap_vals[co_pre_idx]^2)
+mspe_cutoff <- 5
+ 
+placebo_states <- list(
+  list(name = "Idaho",         fips = 16),
+  list(name = "Indiana",       fips = 18),
+  list(name = "Iowa",          fips = 19),
+  list(name = "Kansas",        fips = 20),
+  list(name = "Nebraska",      fips = 31),
+  list(name = "New Hampshire", fips = 33),
+  list(name = "Oklahoma",      fips = 40),
+  list(name = "Pennsylvania",  fips = 42),
+  list(name = "Utah",          fips = 49),
+  list(name = "Wisconsin",     fips = 55),
+  list(name = "Wyoming",       fips = 56)
+)
+ 
+all_gaps          <- data.frame(year = years_all)
+all_gaps$Colorado <- gap_vals
+ 
+# table to track which states pass the mspe filter
+placebo_mspe_table <- data.frame(
+  state = character(), fips = numeric(),
+  placebo_mspe = numeric(), ratio_vs_colorado = numeric(),
+  included = logical(), stringsAsFactors = FALSE
+)
+ 
+included_states <- c()
+ 
+for (pl in placebo_states) {
+ 
+  # each placebo state gets colorado + remaining donors as its control pool
+  placebo_donors <- c(8, setdiff(donor_fips, pl$fips))
+ 
+  tryCatch({
+    dp <- dataprep(
+      foo                   = data,
+      predictors            = c("polit_ideo", "unem_rate", "young_adult_share",
+                                "urban_pop", "alcohol_per_cap", "median_income"),
+      predictors.op         = "mean",
+      special.predictors    = list(
+        list("fatality_rate", 2006, "mean"),
+        list("fatality_rate", 2007, "mean"),
+        list("fatality_rate", 2008, "mean"),
+        list("fatality_rate", 2009, "mean"),
+        list("fatality_rate", 2010, "mean"),
+        list("fatality_rate", 2011, "mean"),
+        list("fatality_rate", 2012, "mean"),
+        list("fatality_rate", 2013, "mean")
+      ),
+      dependent             = "fatality_rate",
+      unit.variable         = "fips",
+      unit.names.variable   = "state",
+      time.variable         = "year",
+      treatment.identifier  = pl$fips,
+      controls.identifier   = placebo_donors,
+      time.predictors.prior = 2006:2013,
+      time.optimize.ssr     = 2006:2013,
+      time.plot             = 2006:2023
+    )
+ 
+    sp          <- synth(data.prep.obj = dp)
+    placebo_gap <- as.numeric(dp$Y1plot) - as.numeric(dp$Y0plot %*% sp$solution.w)
+ 
+    pre_idx      <- which(dp$tag$time.plot < 2014)
+    placebo_mspe <- mean(placebo_gap[pre_idx]^2)
+    ratio        <- placebo_mspe / co_mspe
+    keep         <- ratio <= mspe_cutoff
+ 
+    placebo_mspe_table <- rbind(placebo_mspe_table,
+      data.frame(state = pl$name, fips = pl$fips,
+                 placebo_mspe = placebo_mspe, ratio_vs_colorado = ratio,
+                 included = keep, stringsAsFactors = FALSE))
+ 
+    if (keep) {
+      all_gaps[[pl$name]] <- placebo_gap
+      included_states     <- c(included_states, pl$name)
+    } else {
+      message("Excluding ", pl$name, " - pre-MSPE ratio ", round(ratio, 1), "x")
+    }
+ 
+  }, error = function(e) message("failed for ", pl$name, ": ", e$message))
+}
+ 
+placebo_mspe_table <- placebo_mspe_table[order(placebo_mspe_table$ratio_vs_colorado), ]
+print(co_mspe)
+print(placebo_mspe_table)
+ 
+# plot in-space placebo
+cols_to_plot <- c("Colorado", included_states)
+y_vals <- unlist(all_gaps[, cols_to_plot], use.names = FALSE)
+y_min  <- min(y_vals, na.rm = TRUE) - 0.05
+y_max  <- max(y_vals, na.rm = TRUE) + 0.05
+ 
+par(mar = c(5, 5, 4, 2))
+plot(years_all, all_gaps$Colorado,
+     type = "n", ylim = c(y_min, y_max),
+     xlab = "Year",
+     ylab = "Gap in Fatality Rate per 100,000 Population",
+     main = "In-Space Placebo Test")
+ 
+for (st in included_states) lines(years_all, all_gaps[[st]], col = "gray70", lwd = 1)
+lines(years_all, all_gaps$Colorado, col = "black", lwd = 2.5)
+ 
+abline(v = 2014, lty = 2, col = "black")
+abline(h = 0,    lty = 1, col = "black")
+legend("topleft",
+       legend = c("Colorado", "Donor state placebos (MSPE ratio <= 5x)"),
+       col = c("black", "gray70"), lwd = c(2.5, 1), bty = "n", cex = 0.85)
+par(mar = c(5, 4, 4, 2) + 0.1)
+ 
+ 
+# post-to-pre MSPE ratio test
+pre_idx  <- which(years_all < 2014)
+post_idx <- which(years_all >= 2014)
+ 
+co_pre_mspe  <- mean(gap_vals[pre_idx]^2)
+co_post_mspe <- mean(gap_vals[post_idx]^2)
+co_ratio     <- co_post_mspe / co_pre_mspe
+ 
+cat("Colorado pre-treatment MSPE: ",  round(co_pre_mspe, 6),  "\n")
+cat("Colorado post-treatment MSPE:", round(co_post_mspe, 6), "\n")
+cat("Colorado post/pre MSPE ratio:", round(co_ratio, 2),     "\n\n")
+ 
+# build ratio table for all valid placebo states
+ratio_table <- data.frame(
+  State     = "Colorado",
+  Pre_MSPE  = round(co_pre_mspe, 6),
+  Post_MSPE = round(co_post_mspe, 6),
+  Ratio     = round(co_ratio, 2),
+  stringsAsFactors = FALSE
+)
+ 
+for (st in included_states) {
+  pl_gap       <- all_gaps[[st]]
+  pl_pre_mspe  <- mean(pl_gap[pre_idx]^2)
+  pl_post_mspe <- mean(pl_gap[post_idx]^2)
+  pl_ratio     <- pl_post_mspe / pl_pre_mspe
+  ratio_table  <- rbind(ratio_table,
+    data.frame(State = st, Pre_MSPE = round(pl_pre_mspe, 6),
+               Post_MSPE = round(pl_post_mspe, 6), Ratio = round(pl_ratio, 2),
+               stringsAsFactors = FALSE))
+}
+ 
+ratio_table  <- ratio_table[order(-ratio_table$Ratio), ]
+rownames(ratio_table) <- NULL
+print(ratio_table)
+ 
+# p-value = rank / total units
+n_units <- nrow(ratio_table)
+co_rank <- which(ratio_table$State == "Colorado")
+p_value <- co_rank / n_units
+cat("Colorado rank:", co_rank, "out of", n_units, "\n")
+cat("Implied p-value:", round(p_value, 3), "\n")
+ 
+# latex table for ratio test
+colnames(ratio_table) <- c("State", "Pre-Treatment MSPE", "Post-Treatment MSPE", "Post/Pre Ratio")
+print(xtable(ratio_table,
+             caption = "Post-to-Pre MSPE Ratios: Colorado and Placebo States",
+             label   = "tab:mspe",
+             digits  = c(0, 0, 6, 6, 2)),
+      include.rownames = FALSE, booktabs = TRUE, caption.placement = "top")
+ 
+ 
+# cohen's D
+mean_post_gap <- mean(gap_vals[post_idx])
+sd_pre_gap    <- sd(gap_vals[pre_idx])
+cohens_d      <- mean_post_gap / sd_pre_gap
+ 
+cat("Mean post-treatment gap (ATT):", round(mean_post_gap, 3), "\n")
+cat("SD of pre-treatment gap:      ", round(sd_pre_gap, 3),    "\n")
+cat("Cohen's D:                    ", round(cohens_d, 2),       "\n")
